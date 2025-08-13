@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRON dApp Diagnostics</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tronweb@5.1.0/dist/TronWeb.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+            <h1 class="text-3xl font-bold text-center text-blue-600 mb-8">
+                🔧 TRON dApp Diagnostics
+            </h1>
+            
+            <!-- 診斷結果 -->
+            <div id="results" class="space-y-4"></div>
+            
+            <!-- 操作按鈕 -->
+            <div class="mt-8 text-center space-x-4">
+                <button id="run-diagnostics" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                    🔍 Run Diagnostics
+                </button>
+                <button id="check-contract" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                    📋 Check Contract
+                </button>
+                <button id="test-mainnet" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">
+                    🌐 Test Mainnet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let tronWeb;
+        const CONTRACT_ADDRESS = 'TQb3Bj46dTqwzQ4ynTLDrHzDLpW2gxyl';
+        const NILE_CONTRACT = 'TQb3Bj46dTqwzQ4ynTLDrHzDLpW2gxyl'; // Your contract
+        const MAINNET_USDT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'; // USDT contract on mainnet
+        
+        function addResult(title, content, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const colors = {
+                success: 'bg-green-50 border-green-200 text-green-800',
+                error: 'bg-red-50 border-red-200 text-red-800',
+                warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+                info: 'bg-blue-50 border-blue-200 text-blue-800'
+            };
+            
+            const div = document.createElement('div');
+            div.className = `p-4 rounded-lg border ${colors[type]}`;
+            div.innerHTML = `
+                <h3 class="font-bold text-lg">${title}</h3>
+                <div class="mt-2 text-sm">${content}</div>
+            `;
+            resultsDiv.appendChild(div);
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        async function checkTronWebStatus() {
+            addResult('🔍 TronWeb Status', 'Checking TronWeb availability...', 'info');
+            
+            if (!window.tronWeb) {
+                addResult('❌ TronWeb Not Found', 'TronLink is not installed or not accessible', 'error');
+                return false;
+            }
+            
+            if (!window.tronWeb.ready) {
+                addResult('⚠️ TronWeb Not Ready', 'TronLink is installed but not ready. Please unlock your wallet.', 'warning');
+                return false;
+            }
+            
+            tronWeb = window.tronWeb;
+            
+            const info = {
+                'Ready': tronWeb.ready,
+                'Address': tronWeb.defaultAddress?.base58 || 'Not connected',
+                'Network Host': tronWeb.fullNode.host,
+                'Event Host': tronWeb.eventServer?.host || 'N/A',
+                'Solidity Host': tronWeb.solidityNode?.host || 'N/A'
+            };
+            
+            let content = '<pre>';
+            for (const [key, value] of Object.entries(info)) {
+                content += `${key}: ${value}\n`;
+            }
+            content += '</pre>';
+            
+            addResult('✅ TronWeb Status', content, 'success');
+            return true;
+        }
+        
+        async function checkNetworkInfo() {
+            if (!tronWeb) return;
+            
+            try {
+                const nodeInfo = await tronWeb.trx.getNodeInfo();
+                addResult('🌐 Network Info', `
+                    <pre>${JSON.stringify(nodeInfo, null, 2)}</pre>
+                `, 'info');
+            } catch (e) {
+                addResult('❌ Network Info Failed', e.message, 'error');
+            }
+        }
+        
+        async function checkAccountInfo() {
+            if (!tronWeb || !tronWeb.defaultAddress?.base58) return;
+            
+            try {
+                const address = tronWeb.defaultAddress.base58;
+                const account = await tronWeb.trx.getAccount(address);
+                const balance = await tronWeb.trx.getBalance(address);
+                
+                addResult('👤 Account Info', `
+                    <strong>Address:</strong> ${address}<br/>
+                    <strong>Balance:</strong> ${balance / 1000000} TRX<br/>
+                    <strong>Account Details:</strong><br/>
+                    <pre>${JSON.stringify(account, null, 2)}</pre>
+                `, 'success');
+            } catch (e) {
+                addResult('❌ Account Info Failed', e.message, 'error');
+            }
+        }
+        
+        async function checkContract(contractAddress, label) {
+            if (!tronWeb) return;
+            
+            try {
+                addResult(`🔍 Checking ${label}`, `Address: ${contractAddress}`, 'info');
+                
+                // 檢查合約是否存在
+                const contractInfo = await tronWeb.trx.getContract(contractAddress);
+                
+                if (contractInfo && contractInfo.contract_address) {
+                    addResult(`✅ ${label} Found`, `
+                        <strong>Address:</strong> ${contractInfo.contract_address}<br/>
+                        <strong>Origin Address:</strong> ${contractInfo.origin_address}<br/>
+                        <strong>Contract Details:</strong><br/>
+                        <pre>${JSON.stringify(contractInfo, null, 2)}</pre>
+                    `, 'success');
+                    
+                    // 嘗試初始化合約實例
+                    try {
+                        const instance = await tronWeb.contract().at(contractAddress);
+                        addResult(`✅ ${label} Instance Created`, 'Contract instance created successfully', 'success');
+                        
+                        // 檢查可用方法
+                        const methods = Object.keys(instance).filter(key => typeof instance[key] === 'function');
+                        addResult(`📋 ${label} Methods`, `
+                            Available methods: ${methods.join(', ')}<br/>
+                            <small>Total: ${methods.length} methods</small>
+                        `, 'info');
+                        
+                    } catch (initError) {
+                        addResult(`❌ ${label} Instance Failed`, initError.message, 'error');
+                    }
+                    
+                } else {
+                    addResult(`❌ ${label} Not Found`, 'Contract does not exist on this network', 'error');
+                }
+                
+            } catch (e) {
+                addResult(`❌ ${label} Check Failed`, e.message, 'error');
+            }
+        }
+        
+        async function runFullDiagnostics() {
+            clearResults();
+            
+            addResult('🚀 Starting Diagnostics', 'Running comprehensive checks...', 'info');
+            
+            // 檢查 TronWeb
+            const tronWebOk = await checkTronWebStatus();
+            if (!tronWebOk) return;
+            
+            // 檢查網絡信息
+            await checkNetworkInfo();
+            
+            // 檢查賬戶信息
+            await checkAccountInfo();
+            
+            // 檢查您的合約
+            await checkContract(CONTRACT_ADDRESS, 'Your Contract');
+        }
+        
+        async function testMainnetContract() {
+            clearResults();
+            
+            if (!tronWeb) {
+                addResult('❌ TronWeb Not Available', 'Please connect TronLink first', 'error');
+                return;
+            }
+            
+            // 檢查是否在主網
+            const network = tronWeb.fullNode.host;
+            if (!network.includes('api.tron')) {
+                addResult('⚠️ Not on Mainnet', `Current network: ${network}. Switch to mainnet to test USDT contract.`, 'warning');
+            }
+            
+            // 測試 USDT 合約（主網）
+            await checkContract(MAINNET_USDT, 'USDT Contract (Mainnet)');
+        }
+        
+        // 事件監聽器
+        document.getElementById('run-diagnostics').addEventListener('click', runFullDiagnostics);
+        
+        document.getElementById('check-contract').addEventListener('click', async () => {
+            clearResults();
+            if (!tronWeb) {
+                addResult('❌ TronWeb Not Available', 'Please connect TronLink first', 'error');
+                return;
+            }
+            await checkContract(CONTRACT_ADDRESS, 'Your Contract');
+        });
+        
+        document.getElementById('test-mainnet').addEventListener('click', testMainnetContract);
+        
+        // 頁面加載時自動運行診斷
+        window.addEventListener('load', () => {
+            setTimeout(runFullDiagnostics, 1000);
+        });
+        
+        // 監聽 TronWeb 變化
+        window.addEventListener('message', function(event) {
+            if (event.data.message && event.data.message.action == "tabReply") {
+                if (event.data.message.data.data.account) {
+                    setTimeout(runFullDiagnostics, 1000);
+                }
+            }
+        });
+    </script>
+</body>
+</html> 
